@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime, timezone
 
 import aiohttp
 
@@ -24,14 +25,19 @@ def generate_output_folder() -> None:
         os.mkdir("generated")
 
 
+def calculate_days_since_first_commit() -> int:
+    """
+    Calculate days since August 4th, 2024 (your first commit)
+    """
+    first_commit_date = datetime(2024, 8, 4, tzinfo=timezone.utc)
+    current_date = datetime.now(timezone.utc)
+    days_diff = (current_date - first_commit_date).days
+    return max(days_diff, 1)  # At least 1 day to avoid division by zero
+
+
 async def safe_get_stat(coroutine, description: str, max_retries: int = 3, delay: int = 5):
     """
     Safely get a statistic with retry logic for 202 responses
-    
-    :param coroutine: The async function/coroutine to execute
-    :param description: Description for logging
-    :param max_retries: Maximum number of retries
-    :param delay: Delay between retries in seconds
     """
     for attempt in range(max_retries + 1):
         try:
@@ -41,7 +47,7 @@ async def safe_get_stat(coroutine, description: str, max_retries: int = 3, delay
         except Exception as e:
             if "202" in str(e) or "Accepted" in str(e):
                 if attempt < max_retries:
-                    wait_time = delay * (2 ** attempt)  # Exponential backoff
+                    wait_time = delay * (2 ** attempt)
                     print(f"⏳ {description} returned 202 (processing). Waiting {wait_time}s... (attempt {attempt + 1}/{max_retries + 1})")
                     await asyncio.sleep(wait_time)
                     continue
@@ -51,7 +57,6 @@ async def safe_get_stat(coroutine, description: str, max_retries: int = 3, delay
             else:
                 print(f"❌ {description} failed with error: {e}")
                 raise
-    
     return None
 
 
@@ -62,10 +67,10 @@ async def safe_get_stat(coroutine, description: str, max_retries: int = 3, delay
 
 async def generate_overview(s: Stats) -> None:
     """
-    Generate an SVG badge with summary statistics
+    Generate an SVG badge with summary statistics including days since first commit
     :param s: Represents user's GitHub statistics
     """
-    print("🔄 Generating overview badge...")
+    print("🔄 Generating enhanced overview badge...")
     
     try:
         with open("templates/overview.svg", "r") as f:
@@ -80,9 +85,12 @@ async def generate_overview(s: Stats) -> None:
         views = await safe_get_stat(s.views, "views count")
         repos = await safe_get_stat(s.repos, "repositories list")
 
-        # Process the data
+        # Calculate enhanced stats
         changed = lines_changed_data[0] + lines_changed_data[1]
+        days_since_first_commit = calculate_days_since_first_commit()
+        lines_per_day = changed // days_since_first_commit if days_since_first_commit > 0 else 0
         
+        # Replace template variables
         output = re.sub("{{ name }}", name, output)
         output = re.sub("{{ stars }}", f"{stars:,}", output)
         output = re.sub("{{ forks }}", f"{forks:,}", output)
@@ -90,12 +98,16 @@ async def generate_overview(s: Stats) -> None:
         output = re.sub("{{ lines_changed }}", f"{changed:,}", output)
         output = re.sub("{{ views }}", f"{views:,}", output)
         output = re.sub("{{ repos }}", f"{len(repos):,}", output)
+        
+        # Add new stats
+        output = re.sub("{{ days_coding }}", f"{days_since_first_commit:,}", output)
+        output = re.sub("{{ lines_per_day }}", f"{lines_per_day:,}", output)
 
         generate_output_folder()
         with open("generated/overview.svg", "w") as f:
             f.write(output)
         
-        print("✅ Overview badge generated successfully!")
+        print(f"✅ Overview badge generated! Days coding: {days_since_first_commit}, Lines/day: {lines_per_day:,}")
         
     except Exception as e:
         print(f"❌ Failed to generate overview badge: {e}")
@@ -163,11 +175,15 @@ fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8z"></path></svg>
 
 async def main() -> None:
     """
-    Generate all badges
+    Generate all badges with enhanced statistics
     """
-    print("🚀 Starting GitHub stats generation...")
+    print("🚀 Starting enhanced GitHub stats generation...")
     
-    # Check environment variables
+    # Calculate and display the epic stats
+    days_since_start = calculate_days_since_first_commit()
+    print(f"📅 Days since first commit (Aug 4th): {days_since_start}")
+    print(f"🔥 That's some INSANE productivity!")
+    
     access_token = os.getenv("ACCESS_TOKEN")
     if not access_token:
         access_token = os.getenv("GITHUB_TOKEN")
@@ -178,7 +194,7 @@ async def main() -> None:
     if user is None:
         raise RuntimeError("Environment variable GITHUB_ACTOR must be set.")
     
-    print(f"📊 Generating stats for user: {user}")
+    print(f"📊 Generating enhanced stats for user: {user}")
     
     exclude_repos = os.getenv("EXCLUDED")
     excluded_repos = (
@@ -190,7 +206,6 @@ async def main() -> None:
         {x.strip() for x in exclude_langs.split(",")} if exclude_langs else None
     )
     
-    # Convert a truthy value to a Boolean
     raw_ignore_forked_repos = os.getenv("EXCLUDE_FORKED_REPOS")
     ignore_forked_repos = (
         not not raw_ignore_forked_repos
@@ -204,8 +219,7 @@ async def main() -> None:
     if ignore_forked_repos:
         print("🍴 Ignoring forked repositories")
     
-    # Set longer timeout for aiohttp to handle slow GitHub API responses
-    timeout = aiohttp.ClientTimeout(total=300)  # 5 minute timeout
+    timeout = aiohttp.ClientTimeout(total=300)
     
     try:
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -218,17 +232,13 @@ async def main() -> None:
                 ignore_forked_repos=ignore_forked_repos,
             )
             
-            # Generate both badges with proper error handling
-            # Run them sequentially to avoid overwhelming the API
-            print("\n📈 Starting badge generation...")
+            print("\n📈 Starting enhanced badge generation...")
             await generate_overview(s)
-            
-            # Small delay between generations to be nice to the API
             await asyncio.sleep(2)
-            
             await generate_languages(s)
             
-            print("\n🎉 All badges generated successfully!")
+            print("\n🎉 All enhanced badges generated successfully!")
+            print(f"💪 Showing {days_since_start} days of epic coding journey!")
             
     except Exception as e:
         print(f"\n💥 Fatal error during generation: {e}")
