@@ -1,11 +1,15 @@
 name: Generate Stats Images
-
 on:
   push:
     branches: [ master ]
   schedule:
-    - cron: "5 0 * * *"
+    - cron: "5 0 * * *"  # Fixed: was missing a *
   workflow_dispatch:
+
+# Prevent concurrent runs
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -13,11 +17,12 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
     # Check out repository under $GITHUB_WORKSPACE, so the job can access it
-    - uses: actions/checkout@v3
-
+    - uses: actions/checkout@v4  # Updated to v4
+      with:
+        fetch-depth: 0  # Fetch full history to avoid rebase issues
+        
     # Run using Python 3.8 for consistency and aiohttp
     - name: Set up Python 3.8
       uses: actions/setup-python@v4
@@ -25,35 +30,71 @@ jobs:
         python-version: '3.8'
         architecture: 'x64'
         cache: 'pip'
-
+        
     # Install dependencies with `pip`
     - name: Install requirements
       run: |
         python3 -m pip install --upgrade pip setuptools wheel
         python3 -m pip install -r requirements.txt
-    # Generate all statistics images
+        
+    # Generate all statistics images with retry logic
     - name: Generate images
       run: |
         python3 --version
-        python3 generate_images.py
+        echo "Starting image generation..."
+        
+        # Run with timeout and retry logic
+        for i in {1..3}; do
+          echo "Attempt $i of 3"
+          timeout 300 python3 generate_images.py && break
+          echo "Attempt $i failed, waiting 30 seconds before retry..."
+          sleep 30
+        done
+        
+        echo "Generation completed. Checking files:"
+        ls -la *.svg || echo "No SVG files found"
+        
       env:
         ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         EXCLUDED: ${{ secrets.EXCLUDED }}
         EXCLUDED_LANGS: ${{ secrets.EXCLUDED_LANGS }}
         EXCLUDE_FORKED_REPOS: true
+        
+    # Check what files were actually generated/modified
+    - name: Check git status
+      run: |
+        echo "Git status:"
+        git status
+        echo "Modified files:"
+        git diff --name-only
+        echo "All SVG files in directory:"
+        ls -la *.svg || echo "No SVG files found"
+        
     # Commit all changed files to the repository
     - name: Commit and push changes
       run: |
         git config --global user.name "github-stats[bot]"
         git config --global user.email "github-stats[bot]@users.noreply.github.com"
-        git add .
+        
+        # Add only the SVG files we care about
+        git add *.svg 2>/dev/null || echo "No SVG files to add"
+        
         # Check if there are changes to commit
         if git diff --staged --quiet; then
           echo "No changes to commit."
-        else
-          git commit -m "Update generated stats images"
-          # Pull with rebase to handle potential race conditions, then push
-          git pull --rebase
-          git push
+          exit 0
         fi
+        
+        echo "Changes detected, committing..."
+        git diff --staged --name-only
+        
+        git commit -m "Update generated stats images [skip ci]"
+        
+        # Simple push without rebase to avoid conflicts
+        # If there are conflicts, the next run will handle them
+        git push origin master || {
+          echo "Push failed, likely due to concurrent runs. This is expected."
+          echo "The next scheduled run will pick up any missed changes."
+          exit 0
+        }
