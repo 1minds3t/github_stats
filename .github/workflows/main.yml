@@ -43,13 +43,18 @@ jobs:
         EXCLUDED: ${{ secrets.EXCLUDED }}
         EXCLUDED_LANGS: ${{ secrets.EXCLUDED_LANGS }}
         EXCLUDE_FORKED_REPOS: true
-
     # Commit all changed files to the repository
-    - name: Commit to the repo
+    - name: Commit and push changes
       run: |
-        git config --global user.name "jstrieb/github-stats"
-        git config --global user.email "github-stats[bot]@jstrieb.github.io"
+        git config --global user.name "github-stats[bot]"
+        git config --global user.email "github-stats[bot]@users.noreply.github.com"
         git add .
-        # Force the build to succeed, even if no files were changed
-        git commit -m 'Update generated files' || true
-        git push
+        # Check if there are changes to commit
+        if git diff --staged --quiet; then
+          echo "No changes to commit."
+        else
+          git commit -m "Update generated stats images"
+          # Pull with rebase to handle potential race conditions, then push
+          git pull --rebase
+          git push
+        fi
