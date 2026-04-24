@@ -7,7 +7,6 @@ Replacement for generate_images.py
 - Days/commits calculated from account creation date
 """
 
-import asyncio
 import os
 import re
 import sys
@@ -17,7 +16,6 @@ import shutil
 from datetime import datetime, timezone
 from typing import Dict, Tuple
 
-import aiohttp
 import requests
 
 
@@ -137,7 +135,8 @@ def get_commit_counts(repos: list) -> Tuple[Dict[str, int], Dict[str, int]]:
     total_counts = {}
     for repo in repos:
         name = repo["nameWithOwner"]
-        print(f"  counting commits: {name}")
+        label = "[private]" if repo.get("isPrivate") else name
+        print(f"  counting commits: {label}")
         my_counts[name] = rest_last_page(f"repos/{name}/commits", {"author": OWNER})
         total_counts[name] = rest_last_page(f"repos/{name}/commits")
     return my_counts, total_counts
@@ -161,11 +160,12 @@ def get_loc_from_clones(repos: list, my_counts: dict, total_counts: dict) -> Tup
                 continue
 
             if repo["isFork"]:
-                # Can't clone uv etc — skip, too large
-                print(f"  skipping fork for LOC: {name}")
+                label = "[private fork]" if repo.get("isPrivate") else name
+                print(f"  skipping fork for LOC: {label}")
                 continue
 
-            print(f"  cloning for LOC: {name}")
+            label = "[private]" if repo.get("isPrivate") else name
+            print(f"  cloning for LOC: {label}")
             clone_dir = os.path.join(tmpdir, name.replace("/", "_"))
             try:
                 subprocess.run(
@@ -188,7 +188,8 @@ def get_loc_from_clones(repos: list, my_counts: dict, total_counts: dict) -> Tup
                         except ValueError:
                             pass  # binary files show '-'
             except Exception as e:
-                print(f"  LOC clone failed for {name}: {e}")
+                label = "[private]" if repo.get("isPrivate") else name
+                print(f"  LOC clone failed for {label}: {e}")
             finally:
                 shutil.rmtree(clone_dir, ignore_errors=True)
     finally:
@@ -312,7 +313,9 @@ def main() -> None:
     print("📦 Fetching repos...")
     repos = get_repos()
     stars = sum(r["stargazers"]["totalCount"] for r in repos)
-    print(f"   {len(repos)} repos, {stars:,} stars")
+    public_count = sum(1 for r in repos if not r.get("isPrivate"))
+    private_count = sum(1 for r in repos if r.get("isPrivate"))
+    print(f"   {public_count} public + {private_count} private repos, {stars:,} stars")
 
     print("🔢 Counting commits per repo...")
     my_counts, total_counts = get_commit_counts(repos)
