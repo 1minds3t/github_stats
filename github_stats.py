@@ -446,6 +446,9 @@ Languages:
         """
         if self._lines_changed is not None:
             return self._lines_changed
+        # /stats/contributors broken since Apr 12 2026 - returns 202 forever
+        self._lines_changed = (0, 0)
+        return self._lines_changed
         additions = 0
         deletions = 0
         for repo in await self.repos:
