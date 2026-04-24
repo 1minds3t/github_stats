@@ -37,23 +37,9 @@ jobs:
         python3 -m pip install --upgrade pip setuptools wheel
         python3 -m pip install -r requirements.txt
         
-    # Generate all statistics images with retry logic
     - name: Generate images
       run: |
-        python3 --version
-        echo "Starting image generation..."
-        
-        # Run with timeout and retry logic
-        for i in {1..3}; do
-          echo "Attempt $i of 3"
-          timeout 300 python3 generate_images.py && break
-          echo "Attempt $i failed, waiting 30 seconds before retry..."
-          sleep 30
-        done
-        
-        echo "Generation completed. Checking files:"
-        ls -la *.svg || echo "No SVG files found"
-        
+        python3 generate_images.py
       env:
         ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
