@@ -49,7 +49,7 @@ def gql(query: str) -> dict:
     return r.json()
 
 
-def rest(path: str, params: dict = None) -> dict | list:
+def rest(path: str, params: dict = None):
     url = f"https://api.github.com/{path.lstrip('/')}"
     r = requests.get(url, headers=HEADERS, params=params, timeout=30)
     r.raise_for_status()
