@@ -73,14 +73,14 @@ class Queries(object):
         :return: deserialized REST JSON output
         """
 
-        for _ in range(60):
-            headers = {
-                "Authorization": f"token {self.access_token}",
-            }
-            if params is None:
-                params = dict()
-            if path.startswith("/"):
-                path = path[1:]
+        if params is None:
+            params = dict()
+        if path.startswith("/"):
+            path = path[1:]
+        headers = {
+            "Authorization": f"token {self.access_token}",
+        }
+        for attempt in range(10):
             try:
                 async with self.semaphore:
                     r_async = await self.session.get(
@@ -89,31 +89,26 @@ class Queries(object):
                         params=tuple(params.items()),
                     )
                 if r_async.status == 202:
-                    # print(f"{path} returned 202. Retrying...")
-                    print(f"A path returned 202. Retrying...")
-                    await asyncio.sleep(2)
+                    wait = min(5 * (2 ** attempt), 60)
+                    print(f"  202 on {path}, waiting {wait}s (attempt {attempt+1}/10)...")
+                    await asyncio.sleep(wait)
                     continue
-
+                if r_async.status == 403 or r_async.status == 429:
+                    print(f"  Rate limited on {path} (status {r_async.status}), waiting 60s...")
+                    await asyncio.sleep(60)
+                    continue
+                if r_async.status == 204:
+                    return dict()
                 result = await r_async.json()
                 if result is not None:
                     return result
-            except:
-                print("aiohttp failed for rest query")
-                # Fall back on non-async requests
-                async with self.semaphore:
-                    r_requests = requests.get(
-                        f"https://api.github.com/{path}",
-                        headers=headers,
-                        params=tuple(params.items()),
-                    )
-                    if r_requests.status_code == 202:
-                        print(f"A path returned 202. Retrying...")
-                        await asyncio.sleep(2)
-                        continue
-                    elif r_requests.status_code == 200:
-                        return r_requests.json()
-        # print(f"There were too many 202s. Data for {path} will be incomplete.")
-        print("There were too many 202s. Data for this repository will be incomplete.")
+            except Exception as e:
+                print(f"  REST query failed for {path}: {e}")
+                if attempt < 9:
+                    await asyncio.sleep(5)
+                    continue
+                raise
+        print(f"  Too many 202s for {path}, returning empty.")
         return dict()
 
     @staticmethod
@@ -483,10 +478,18 @@ Languages:
             return self._lines_changed
         additions = 0
         deletions = 0
-        for repo in await self.repos:
-            r = await self.queries.query_rest(f"/repos/{repo}/stats/contributors")
+        repos = await self.repos
+        print(f"  Fetching line stats for {len(repos)} repos...")
+        for repo in repos:
+            print(f"  → {repo}")
+            try:
+                r = await self.queries.query_rest(f"/repos/{repo}/stats/contributors")
+            except Exception as e:
+                print(f"  ✗ skipping {repo}: {e}")
+                continue
+            if not isinstance(r, list):
+                continue
             for author_obj in r:
-                # Handle malformed response from the API by skipping this repo
                 if not isinstance(author_obj, dict) or not isinstance(
                     author_obj.get("author", {}), dict
                 ):
@@ -494,7 +497,6 @@ Languages:
                 author = author_obj.get("author", {}).get("login", "")
                 if author != self.username:
                     continue
-
                 for week in author_obj.get("weeks", []):
                     additions += week.get("a", 0)
                     deletions += week.get("d", 0)
